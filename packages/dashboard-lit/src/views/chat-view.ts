@@ -15,6 +15,10 @@ export class ChatView extends LitElement {
   @consume({ context: gatewayContext, subscribe: true })
   gateway!: import("../context/gateway-context.js").GatewayState;
 
+  override createRenderRoot() {
+    return this;
+  }
+
   @state() sessionKey = "main";
   @state() message = "";
   @state() submitting = false;

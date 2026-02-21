@@ -10,7 +10,9 @@ export type GatewayState = {
   lastError: string | null;
   hello: GatewayClientHelloOk | null;
   lastEvent: GatewayClientEventFrame | null;
+  gatewayUrl: string;
   request: <T = unknown>(method: string, params?: unknown) => Promise<T>;
+  reconnect: (settings: { gatewayUrl: string; sharedSecret: string }) => void;
 };
 
 export const gatewayContext = createContext<GatewayState>("dashboard-gateway");

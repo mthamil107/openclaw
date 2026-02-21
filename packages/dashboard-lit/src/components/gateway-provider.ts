@@ -31,9 +31,12 @@ export class GatewayProvider extends LitElement {
 
   private client: DashboardGatewayClient | null = null;
   private provider: ContextProvider<typeof gatewayContext> | null = null;
+  private gatewayUrl = resolveDefaultGatewayUrl();
+  private sharedSecret = "";
 
   override connectedCallback(): void {
     super.connectedCallback();
+
     const bootstrap = consumeBootstrapUrlState();
     const token = bootstrap.token || loadStoredToken();
     const gatewayUrl = bootstrap.gatewayUrl || loadStoredGatewayUrl() || resolveDefaultGatewayUrl();
@@ -45,9 +48,48 @@ export class GatewayProvider extends LitElement {
       storeGatewayUrl(bootstrap.gatewayUrl);
     }
 
+    this.gatewayUrl = gatewayUrl;
+    this.sharedSecret = token;
+    this.startClient();
+
+    this.provider = new ContextProvider(this, {
+      context: gatewayContext,
+      initialValue: this.buildGatewayState(),
+    });
+  }
+
+  override disconnectedCallback(): void {
+    this.stopClient();
+    this.provider = null;
+    super.disconnectedCallback();
+  }
+
+  override updated(changed: Map<string, unknown>): void {
+    super.updated(changed);
+    if (
+      this.provider &&
+      (changed.has("connected") ||
+        changed.has("connecting") ||
+        changed.has("lastError") ||
+        changed.has("hello") ||
+        changed.has("lastEvent"))
+    ) {
+      this.provider.setValue(this.buildGatewayState());
+    }
+  }
+
+  private startClient(): void {
+    this.stopClient();
+    this.connected = false;
+    this.connecting = true;
+    this.lastError = null;
+    this.hello = null;
+
+    const sharedSecret = this.sharedSecret || undefined;
     const client = new DashboardGatewayClient({
-      gatewayUrl,
-      token: token || undefined,
+      gatewayUrl: this.gatewayUrl,
+      token: sharedSecret,
+      password: sharedSecret,
       reconnect: true,
       onOpen: () => {
         this.connecting = true;
@@ -75,35 +117,25 @@ export class GatewayProvider extends LitElement {
 
     this.client = client;
     client.start();
-
-    this.provider = new ContextProvider(this, {
-      context: gatewayContext,
-      initialValue: this.buildGatewayState(),
-    });
+    this.provider?.setValue(this.buildGatewayState());
   }
 
-  override disconnectedCallback(): void {
-    if (this.client) {
-      this.client.stop();
-      this.client = null;
+  private stopClient(): void {
+    if (!this.client) {
+      return;
     }
-    this.provider = null;
-    super.disconnectedCallback();
+    this.client.stop();
+    this.client = null;
   }
 
-  override updated(changed: Map<string, unknown>): void {
-    super.updated(changed);
-    if (
-      this.provider &&
-      (changed.has("connected") ||
-        changed.has("connecting") ||
-        changed.has("lastError") ||
-        changed.has("hello") ||
-        changed.has("lastEvent"))
-    ) {
-      this.provider.setValue(this.buildGatewayState());
-    }
-  }
+  private reconnect = (settings: { gatewayUrl: string; sharedSecret: string }): void => {
+    this.gatewayUrl = settings.gatewayUrl.trim() || resolveDefaultGatewayUrl();
+    this.sharedSecret = settings.sharedSecret.trim();
+
+    storeGatewayUrl(this.gatewayUrl);
+    storeToken(this.sharedSecret);
+    this.startClient();
+  };
 
   private buildGatewayState(): GatewayState {
     return {
@@ -112,12 +144,14 @@ export class GatewayProvider extends LitElement {
       lastError: this.lastError,
       hello: this.hello,
       lastEvent: this.lastEvent,
+      gatewayUrl: this.gatewayUrl,
       request: async (method, params) => {
         if (!this.client) {
           throw new Error("gateway client unavailable");
         }
         return this.client.request(method, params);
       },
+      reconnect: this.reconnect,
     };
   }
 
