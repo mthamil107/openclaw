@@ -154,6 +154,7 @@ async function installPluginFromPackageDir(params: {
   mode?: "install" | "update";
   dryRun?: boolean;
   expectedPluginId?: string;
+  force?: boolean;
 }): Promise<InstallPluginResult> {
   const { logger, timeoutMs, mode, dryRun } = resolveTimedPluginInstallModeOptions(params);
 
@@ -205,7 +206,7 @@ async function installPluginFromPackageDir(params: {
     forcedScanEntries.push(resolvedEntry);
   }
 
-  // Scan plugin source for dangerous code patterns (warn-only; never blocks install)
+  // Scan plugin source for dangerous code patterns
   try {
     const scanSummary = await skillScanner.scanDirectoryWithSummary(params.packageDir, {
       includeFiles: forcedScanEntries,
@@ -215,9 +216,16 @@ async function installPluginFromPackageDir(params: {
         .filter((f) => f.severity === "critical")
         .map((f) => `${f.message} (${f.file}:${f.line})`)
         .join("; ");
-      logger.warn?.(
-        `WARNING: Plugin "${pluginId}" contains dangerous code patterns: ${criticalDetails}`,
-      );
+      if (params.force) {
+        logger.warn?.(
+          `WARNING: Plugin "${pluginId}" contains dangerous code patterns: ${criticalDetails}`,
+        );
+      } else {
+        return {
+          ok: false,
+          error: `Plugin blocked: critical security findings in "${pluginId}": ${criticalDetails}. Use --force to install anyway.`,
+        };
+      }
     } else if (scanSummary.warn > 0) {
       logger.warn?.(
         `Plugin "${pluginId}" has ${scanSummary.warn} suspicious code pattern(s). Run "openclaw security audit --deep" for details.`,
@@ -308,6 +316,7 @@ export async function installPluginFromArchive(params: {
   mode?: "install" | "update";
   dryRun?: boolean;
   expectedPluginId?: string;
+  force?: boolean;
 }): Promise<InstallPluginResult> {
   const logger = params.logger ?? defaultLogger;
   const timeoutMs = params.timeoutMs ?? 120_000;
@@ -349,6 +358,7 @@ export async function installPluginFromArchive(params: {
       mode,
       dryRun: params.dryRun,
       expectedPluginId: params.expectedPluginId,
+      force: params.force,
     });
   });
 }
@@ -361,6 +371,7 @@ export async function installPluginFromDir(params: {
   mode?: "install" | "update";
   dryRun?: boolean;
   expectedPluginId?: string;
+  force?: boolean;
 }): Promise<InstallPluginResult> {
   const dirPath = resolveUserPath(params.dirPath);
   if (!(await fileExists(dirPath))) {
@@ -379,6 +390,7 @@ export async function installPluginFromDir(params: {
     mode: params.mode,
     dryRun: params.dryRun,
     expectedPluginId: params.expectedPluginId,
+    force: params.force,
   });
 }
 
@@ -433,6 +445,7 @@ export async function installPluginFromNpmSpec(params: {
   expectedPluginId?: string;
   expectedIntegrity?: string;
   onIntegrityDrift?: (params: PluginNpmIntegrityDriftParams) => boolean | Promise<boolean>;
+  force?: boolean;
 }): Promise<InstallPluginResult> {
   const { logger, timeoutMs, mode, dryRun } = resolveTimedPluginInstallModeOptions(params);
   const expectedPluginId = params.expectedPluginId;
@@ -461,6 +474,7 @@ export async function installPluginFromNpmSpec(params: {
         mode,
         dryRun,
         expectedPluginId,
+        force: params.force,
       }),
   });
   if (!flowResult.ok) {
@@ -484,6 +498,7 @@ export async function installPluginFromPath(params: {
   mode?: "install" | "update";
   dryRun?: boolean;
   expectedPluginId?: string;
+  force?: boolean;
 }): Promise<InstallPluginResult> {
   const resolved = resolveUserPath(params.path);
   if (!(await fileExists(resolved))) {
@@ -500,6 +515,7 @@ export async function installPluginFromPath(params: {
       mode: params.mode,
       dryRun: params.dryRun,
       expectedPluginId: params.expectedPluginId,
+      force: params.force,
     });
   }
 
@@ -513,6 +529,7 @@ export async function installPluginFromPath(params: {
       mode: params.mode,
       dryRun: params.dryRun,
       expectedPluginId: params.expectedPluginId,
+      force: params.force,
     });
   }
 

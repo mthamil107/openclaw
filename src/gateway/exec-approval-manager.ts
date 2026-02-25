@@ -1,8 +1,12 @@
 import { randomUUID } from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
 import type { ExecApprovalDecision } from "../infra/exec-approvals.js";
 
 // Grace period to keep resolved entries for late awaitDecision calls
 const RESOLVED_ENTRY_GRACE_MS = 15_000;
+
+const JOURNAL_FILENAME = "exec-approval-journal.jsonl";
 
 export type ExecApprovalRequestPayload = {
   command: string;
@@ -29,6 +33,15 @@ export type ExecApprovalRecord = {
   resolvedBy?: string | null;
 };
 
+export type JournalEntry = {
+  id: string;
+  command: string;
+  decision: ExecApprovalDecision | undefined;
+  resolvedBy: string | null;
+  resolvedAtMs: number;
+  requestedByDeviceId?: string | null;
+};
+
 type PendingEntry = {
   record: ExecApprovalRecord;
   resolve: (decision: ExecApprovalDecision | null) => void;
@@ -39,6 +52,15 @@ type PendingEntry = {
 
 export class ExecApprovalManager {
   private pending = new Map<string, PendingEntry>();
+  private readonly persistDir: string | undefined;
+
+  constructor(opts?: { persistDir?: string }) {
+    this.persistDir = opts?.persistDir;
+  }
+
+  private get journalPath(): string | undefined {
+    return this.persistDir ? path.join(this.persistDir, JOURNAL_FILENAME) : undefined;
+  }
 
   create(
     request: ExecApprovalRequestPayload,
@@ -126,6 +148,8 @@ export class ExecApprovalManager {
     pending.record.resolvedAtMs = Date.now();
     pending.record.decision = decision;
     pending.record.resolvedBy = resolvedBy ?? null;
+    // Persist to journal (best-effort, never blocks resolve)
+    this.appendJournalEntry(pending.record);
     // Resolve the promise first, then delete after a grace period.
     // This allows in-flight awaitDecision calls to find the resolved entry.
     pending.resolve(decision);
@@ -150,5 +174,69 @@ export class ExecApprovalManager {
   awaitDecision(recordId: string): Promise<ExecApprovalDecision | null> | null {
     const entry = this.pending.get(recordId);
     return entry?.promise ?? null;
+  }
+
+  /**
+   * Load the audit journal from disk. Returns parsed entries.
+   */
+  loadJournal(): JournalEntry[] {
+    const journalPath = this.journalPath;
+    if (!journalPath) {
+      return [];
+    }
+    try {
+      const content = fs.readFileSync(journalPath, "utf-8");
+      const entries: JournalEntry[] = [];
+      for (const line of content.split("\n")) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        try {
+          entries.push(JSON.parse(trimmed) as JournalEntry);
+        } catch {
+          // skip malformed lines
+        }
+      }
+      return entries;
+    } catch (err: unknown) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+        return [];
+      }
+      throw err;
+    }
+  }
+
+  /**
+   * Returns recent resolved approvals from the journal.
+   */
+  getAuditLog(limit?: number): JournalEntry[] {
+    const entries = this.loadJournal();
+    if (limit !== undefined && limit > 0) {
+      return entries.slice(-limit);
+    }
+    return entries;
+  }
+
+  private appendJournalEntry(record: ExecApprovalRecord): void {
+    const journalPath = this.journalPath;
+    if (!journalPath) {
+      return;
+    }
+    const entry: JournalEntry = {
+      id: record.id,
+      command: record.request.command,
+      decision: record.decision,
+      resolvedBy: record.resolvedBy ?? null,
+      resolvedAtMs: record.resolvedAtMs!,
+      requestedByDeviceId: record.requestedByDeviceId ?? null,
+    };
+    try {
+      fs.mkdirSync(path.dirname(journalPath), { recursive: true });
+      fs.appendFileSync(journalPath, JSON.stringify(entry) + "\n", {
+        encoding: "utf-8",
+        mode: 0o600,
+      });
+    } catch {
+      // best-effort: never block resolve on journal write failure
+    }
   }
 }
