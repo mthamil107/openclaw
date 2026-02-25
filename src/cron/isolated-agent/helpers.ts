@@ -76,6 +76,18 @@ export function isHeartbeatOnlyResponse(payloads: DeliveryPayload[], ackMaxChars
   });
 }
 
+export function pickErrorFromPayloads(
+  payloads: Array<{ text?: string; isError?: boolean }>,
+): string | undefined {
+  const errorTexts: string[] = [];
+  for (const p of payloads) {
+    if (p.isError && p.text) {
+      errorTexts.push(p.text);
+    }
+  }
+  return errorTexts.length > 0 ? errorTexts.join("; ") : undefined;
+}
+
 export function resolveHeartbeatAckMaxChars(agentCfg?: { heartbeat?: { ackMaxChars?: number } }) {
   const raw = agentCfg?.heartbeat?.ackMaxChars ?? DEFAULT_HEARTBEAT_ACK_MAX_CHARS;
   return Math.max(0, raw);

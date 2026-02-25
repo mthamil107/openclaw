@@ -58,6 +58,7 @@ import type { CronJob, CronRunOutcome, CronRunTelemetry } from "../types.js";
 import { resolveDeliveryTarget } from "./delivery-target.js";
 import {
   isHeartbeatOnlyResponse,
+  pickErrorFromPayloads,
   pickLastDeliverablePayload,
   pickLastNonEmptyTextFromPayloads,
   pickSummaryFromOutput,
@@ -777,6 +778,18 @@ export async function runCronIsolatedAgentTurn(params: {
         logWarn(`[cron:${params.job.id}] ${String(err)}`);
       }
     }
+  }
+
+  const agentError = pickErrorFromPayloads(payloads);
+  if (agentError) {
+    return withRunSession({
+      status: "error",
+      summary,
+      outputText,
+      error: agentError,
+      delivered,
+      ...telemetry,
+    });
   }
 
   return withRunSession({ status: "ok", summary, outputText, delivered, ...telemetry });
